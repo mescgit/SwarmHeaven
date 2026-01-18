@@ -649,6 +649,7 @@ mod leveling {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use bevy::prelude::*;
 
         #[test]
         fn test_level_up_logic() {
@@ -673,7 +674,7 @@ mod leveling {
             // State transitions are applied at the start of the next frame.
             // But next_state is in NextState resource.
             let next_state = app.world.resource::<NextState<GameState>>();
-
+            
             // To verify state transition, we need to apply state transitions.
             // But we can just check if NextState was set.
             if let Some(s) = next_state.0 {
