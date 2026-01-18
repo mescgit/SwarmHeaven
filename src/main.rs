@@ -239,7 +239,7 @@ mod enemy {
     }
 
     fn enemy_movement(
-        mut enemy_query: Query<&mut Transform, With<Enemy>>,
+        mut enemy_query: Query<&mut Transform, (With<Enemy>, Without<player::Player>)>,
         player_query: Query<&Transform, With<player::Player>>,
         time: Res<Time>,
     ) {
