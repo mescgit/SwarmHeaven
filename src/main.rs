@@ -131,7 +131,10 @@ mod player {
     #[derive(Component)]
     pub struct Player;
 
-    fn spawn_player(mut commands: Commands) {
+    fn spawn_player(mut commands: Commands, query: Query<&Player>) {
+        if !query.is_empty() {
+            return;
+        }
         commands.spawn((
             SpriteBundle {
                 sprite: Sprite {
@@ -816,7 +819,10 @@ mod ui {
     #[derive(Component)]
     struct GameUi;
 
-    fn setup_game_ui(mut commands: Commands) {
+    fn setup_game_ui(mut commands: Commands, query: Query<&GameUi>) {
+        if !query.is_empty() {
+            return;
+        }
         commands.spawn((
             NodeBundle {
                 style: Style {
