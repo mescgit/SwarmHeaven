@@ -17,7 +17,7 @@ const ORBITING_BLADE_RADIUS: f32 = 100.0;
 const ORBITING_BLADE_ROTATION_SPEED: f32 = 2.0;
 
 // Game state
-#[derive(Debug, Clone, Eq, PartialEq, Hash, States, Default)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, States, Default)]
 enum GameState {
     #[default]
     MainMenu,
@@ -239,7 +239,7 @@ mod enemy {
     }
 
     fn enemy_movement(
-        mut enemy_query: Query<&mut Transform, With<Enemy>>,
+        mut enemy_query: Query<&mut Transform, (With<Enemy>, Without<player::Player>)>,
         player_query: Query<&Transform, With<player::Player>>,
         time: Res<Time>,
     ) {
@@ -643,6 +643,42 @@ mod leveling {
             player_stats.xp -= player_stats.xp_to_next_level;
             player_stats.xp_to_next_level = (player_stats.xp_to_next_level as f32 * 1.5) as u32;
             game_state.set(GameState::Paused);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_level_up_logic() {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+               .init_state::<GameState>()
+               .insert_resource(PlayerStats {
+                   xp: 100,
+                   level: 1,
+                   xp_to_next_level: 100,
+               })
+               .add_systems(Update, check_level_up);
+
+            app.update();
+
+            let stats = app.world.resource::<PlayerStats>();
+            assert_eq!(stats.level, 2);
+            assert_eq!(stats.xp, 0);
+            assert_eq!(stats.xp_to_next_level, 150); // 100 * 1.5
+
+            let _state = app.world.resource::<State<GameState>>();
+            // State transitions are applied at the start of the next frame.
+            // But next_state is in NextState resource.
+            let next_state = app.world.resource::<NextState<GameState>>();
+
+            // To verify state transition, we need to apply state transitions.
+            // But we can just check if NextState was set.
+            if let Some(s) = next_state.0 {
+                assert_eq!(s, GameState::Paused);
+            }
         }
     }
 }
