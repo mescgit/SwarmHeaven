@@ -3,6 +3,8 @@ use bevy::{
     prelude::*,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     window::PresentMode,
+    core_pipeline::bloom::BloomSettings,
+    core_pipeline::tonemapping::Tonemapping,
 };
 use rand::Rng;
 
@@ -49,6 +51,7 @@ fn main() {
             leveling::LevelingPlugin,
             ui::UiPlugin,
             waves::WavePlugin,
+            particles::ParticlePlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(OnEnter(GameState::MainMenu), setup_main_menu)
@@ -61,7 +64,37 @@ fn main() {
 struct MainMenu;
 
 fn setup(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn((
+        Camera2dBundle {
+            camera: Camera {
+                hdr: true,
+                ..default()
+            },
+            tonemapping: Tonemapping::TonyMcMapface,
+            ..default()
+        },
+        BloomSettings::default(),
+    ));
+
+    // Starfield
+    let mut rng = rand::thread_rng();
+    for _ in 0..500 {
+        let pos = Vec2::new(
+            rng.gen_range(-2000.0..2000.0),
+            rng.gen_range(-2000.0..2000.0),
+        );
+        let size = rng.gen_range(1.0..3.0);
+        let color_val = rng.gen_range(0.5..1.0);
+        commands.spawn(SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgb(color_val, color_val, color_val),
+                custom_size: Some(Vec2::new(size, size)),
+                ..default()
+            },
+            transform: Transform::from_translation(pos.extend(-100.0)),
+            ..default()
+        });
+    }
 }
 
 fn setup_main_menu(mut commands: Commands) {
@@ -510,6 +543,7 @@ mod combat {
         projectile_query: Query<(Entity, &Transform), With<Projectile>>,
         enemy_query: Query<(Entity, &Transform), With<enemy::Enemy>>,
         mut xp_events: EventWriter<leveling::XpDropEvent>,
+        mut particle_events: EventWriter<crate::particles::SpawnParticleEvent>,
         weapon_stats: Res<WeaponStats>,
     ) {
         for (proj_entity, proj_transform) in projectile_query.iter() {
@@ -522,6 +556,11 @@ mod combat {
                     commands.entity(proj_entity).despawn();
                     commands.entity(enemy_entity).despawn();
                     xp_events.send(leveling::XpDropEvent(enemy_transform.translation));
+                    particle_events.send(crate::particles::SpawnParticleEvent {
+                        position: enemy_transform.translation,
+                        color: Color::rgb(1.0, 0.5, 0.0), // Orange explosion
+                        count: 10,
+                    });
 
                     // Chain lightning
                     if weapon_stats.chain_lightning > 0 {
@@ -545,6 +584,11 @@ mod combat {
                             if let Some((target_entity, target_pos)) = closest_new_target {
                                 commands.entity(target_entity).despawn();
                                 xp_events.send(leveling::XpDropEvent(target_pos));
+                                particle_events.send(crate::particles::SpawnParticleEvent {
+                                    position: target_pos,
+                                    color: Color::rgb(0.5, 0.5, 1.0), // Blue lightning sparks
+                                    count: 5,
+                                });
                                 chained_targets.push(target_entity);
                                 last_pos = target_pos;
                             } else {
@@ -602,6 +646,7 @@ mod combat {
         blade_query: Query<&GlobalTransform, With<OrbitingBlade>>,
         enemy_query: Query<(Entity, &Transform), With<enemy::Enemy>>,
         mut xp_events: EventWriter<leveling::XpDropEvent>,
+        mut particle_events: EventWriter<crate::particles::SpawnParticleEvent>,
         mut hit_enemies: Local<Vec<Entity>>,
     ) {
         hit_enemies.clear();
@@ -615,6 +660,11 @@ mod combat {
                 {
                     commands.entity(enemy_entity).despawn();
                     xp_events.send(leveling::XpDropEvent(enemy_transform.translation));
+                    particle_events.send(crate::particles::SpawnParticleEvent {
+                        position: enemy_transform.translation,
+                        color: Color::rgb(0.9, 0.9, 0.9), // White blade sparks
+                        count: 8,
+                    });
                     hit_enemies.push(enemy_entity);
                 }
             }
@@ -1063,6 +1113,91 @@ mod waves {
                         enemy::Enemy,
                     ));
                 }
+            }
+        }
+    }
+}
+mod particles {
+    use super::*;
+
+    pub struct ParticlePlugin;
+
+    impl Plugin for ParticlePlugin {
+        fn build(&self, app: &mut App) {
+            app.add_event::<SpawnParticleEvent>()
+                .add_systems(Update, (spawn_particles, update_particles));
+        }
+    }
+
+    #[derive(Event)]
+    pub struct SpawnParticleEvent {
+        pub position: Vec3,
+        pub color: Color,
+        pub count: u32,
+    }
+
+    #[derive(Component)]
+    struct Particle {
+        velocity: Vec3,
+        lifetime: Timer,
+        start_color: Color,
+        end_color: Color,
+    }
+
+    fn spawn_particles(
+        mut commands: Commands,
+        mut events: EventReader<SpawnParticleEvent>,
+    ) {
+        let mut rng = rand::thread_rng();
+        for event in events.read() {
+            for _ in 0..event.count {
+                let angle = rng.gen_range(0.0..std::f32::consts::PI * 2.0);
+                let speed = rng.gen_range(50.0..200.0);
+                let velocity = Vec3::new(angle.cos() * speed, angle.sin() * speed, 0.0);
+                let size = rng.gen_range(2.0..6.0);
+                let lifetime = rng.gen_range(0.5..1.0);
+
+                commands.spawn((
+                    SpriteBundle {
+                        sprite: Sprite {
+                            color: event.color,
+                            custom_size: Some(Vec2::new(size, size)),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(event.position + Vec3::new(0.0, 0.0, 1.0)), // Above background
+                        ..default()
+                    },
+                    Particle {
+                        velocity,
+                        lifetime: Timer::from_seconds(lifetime, TimerMode::Once),
+                        start_color: event.color,
+                        end_color: event.color.with_a(0.0),
+                    },
+                ));
+            }
+        }
+    }
+
+    fn update_particles(
+        mut commands: Commands,
+        mut query: Query<(Entity, &mut Transform, &mut Sprite, &mut Particle)>,
+        time: Res<Time>,
+    ) {
+        for (entity, mut transform, mut sprite, mut particle) in query.iter_mut() {
+            particle.lifetime.tick(time.delta());
+            if particle.lifetime.finished() {
+                commands.entity(entity).despawn();
+            } else {
+                transform.translation += particle.velocity * time.delta_seconds();
+
+                // Fade out
+                let percent = particle.lifetime.fraction_remaining(); // 1.0 to 0.0
+                // Lerp between start and end color
+                let r = particle.start_color.r() + (particle.end_color.r() - particle.start_color.r()) * (1.0 - percent);
+                let g = particle.start_color.g() + (particle.end_color.g() - particle.start_color.g()) * (1.0 - percent);
+                let b = particle.start_color.b() + (particle.end_color.b() - particle.start_color.b()) * (1.0 - percent);
+                let a = particle.start_color.a() + (particle.end_color.a() - particle.start_color.a()) * (1.0 - percent);
+                sprite.color = Color::rgba(r, g, b, a);
             }
         }
     }
