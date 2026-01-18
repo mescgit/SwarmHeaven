@@ -36,6 +36,7 @@ fn main() {
             }),
             ..default()
         }))
+        .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1))) // Dark space theme
         .add_plugins((
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin::default(),
@@ -143,6 +144,17 @@ mod player {
             },
             Player,
         )).with_children(|parent| {
+            // Glow effect
+            parent.spawn(SpriteBundle {
+                sprite: Sprite {
+                    color: Color::rgba(0.2, 0.7, 0.9, 0.3),
+                    custom_size: Some(Vec2::new(PLAYER_SIZE * 2.0, PLAYER_SIZE * 2.0)),
+                    ..default()
+                },
+                transform: Transform::from_xyz(0.0, 0.0, -1.0),
+                ..default()
+            });
+
             parent.spawn((
                 SpatialBundle::default(),
                 BladeOrbit,
@@ -222,10 +234,15 @@ mod enemy {
                 let spawn_pos = player_transform.translation
                     + Vec3::new(angle.cos() * distance, angle.sin() * distance, 0.0);
 
+                // Vary enemy color slightly
+                let r = rng.gen_range(0.8..1.0);
+                let g = rng.gen_range(0.1..0.3);
+                let b = rng.gen_range(0.1..0.3);
+
                 commands.spawn((
                     SpriteBundle {
                         sprite: Sprite {
-                            color: Color::rgb(0.9, 0.2, 0.2),
+                            color: Color::rgb(r, g, b),
                             custom_size: Some(Vec2::new(ENEMY_SIZE, ENEMY_SIZE)),
                             ..default()
                         },
@@ -309,6 +326,8 @@ mod combat {
         pub chain_lightning: u32,
         pub blade_count: u32,
         pub fire_rate: f32,
+        pub shotgun_count: u32, // New weapon
+        pub homing_count: u32,  // New weapon
     }
 
     impl Default for WeaponStats {
@@ -318,6 +337,8 @@ mod combat {
                 chain_lightning: 0,
                 blade_count: 3,
                 fire_rate: 0.5,
+                shotgun_count: 0,
+                homing_count: 0,
             }
         }
     }
@@ -327,6 +348,7 @@ mod combat {
         direction: Vec3,
         speed: f32,
         ttl: Timer,
+        homing: bool,
     }
 
     #[derive(Component)]
@@ -359,17 +381,50 @@ mod combat {
                     }
                 }
 
-                if let Some(target_pos) = closest_enemy {
-                    let direction = (target_pos - player_transform.translation).normalize_or_zero();
-                    for i in 0..weapon_stats.multishot {
-                        let angle_offset = (i as f32 - (weapon_stats.multishot - 1) as f32 / 2.0) * 0.15;
-                        let rotated_direction = Quat::from_rotation_z(angle_offset).mul_vec3(direction);
-                        
+                let target_dir = if let Some(target_pos) = closest_enemy {
+                    (target_pos - player_transform.translation).normalize_or_zero()
+                } else {
+                    // Default fire direction if no enemies? Or just don't fire.
+                    // Let's fire right if no enemies, or random.
+                    Vec3::X
+                };
+
+                // Base Multishot
+                for i in 0..weapon_stats.multishot {
+                    let angle_offset = (i as f32 - (weapon_stats.multishot - 1) as f32 / 2.0) * 0.15;
+                    let rotated_direction = Quat::from_rotation_z(angle_offset).mul_vec3(target_dir);
+
+                    commands.spawn((
+                        SpriteBundle {
+                            sprite: Sprite {
+                                color: Color::rgb(0.9, 0.9, 0.1),
+                                custom_size: Some(Vec2::new(10.0, 10.0)),
+                                ..default()
+                            },
+                            transform: Transform::from_translation(player_transform.translation),
+                            ..default()
+                        },
+                        Projectile {
+                            direction: rotated_direction,
+                            speed: 800.0,
+                            ttl: Timer::from_seconds(2.0, TimerMode::Once),
+                            homing: false,
+                        },
+                    ));
+                }
+
+                // Shotgun
+                for _ in 0..weapon_stats.shotgun_count {
+                    for _ in 0..5 { // 5 pellets per shotgun blast
+                        let spread = 0.5; // Wider angle
+                        let angle_offset = (rand::thread_rng().gen_range(-0.5..0.5)) * spread;
+                        let rotated_direction = Quat::from_rotation_z(angle_offset).mul_vec3(target_dir);
+
                         commands.spawn((
                             SpriteBundle {
                                 sprite: Sprite {
-                                    color: Color::rgb(0.9, 0.9, 0.1),
-                                    custom_size: Some(Vec2::new(10.0, 10.0)),
+                                    color: Color::rgb(1.0, 0.5, 0.0),
+                                    custom_size: Some(Vec2::new(8.0, 8.0)),
                                     ..default()
                                 },
                                 transform: Transform::from_translation(player_transform.translation),
@@ -377,11 +432,36 @@ mod combat {
                             },
                             Projectile {
                                 direction: rotated_direction,
-                                speed: 800.0,
-                                ttl: Timer::from_seconds(2.0, TimerMode::Once),
+                                speed: 700.0 + rand::thread_rng().gen_range(-50.0..50.0),
+                                ttl: Timer::from_seconds(0.8, TimerMode::Once), // Shorter range
+                                homing: false,
                             },
                         ));
                     }
+                }
+
+                // Homing Missiles
+                for _ in 0..weapon_stats.homing_count {
+                     let angle_offset = rand::thread_rng().gen_range(0.0..std::f32::consts::PI * 2.0);
+                     let rotated_direction = Quat::from_rotation_z(angle_offset).mul_vec3(Vec3::X);
+
+                     commands.spawn((
+                        SpriteBundle {
+                            sprite: Sprite {
+                                color: Color::rgb(0.5, 0.2, 1.0),
+                                custom_size: Some(Vec2::new(12.0, 12.0)),
+                                ..default()
+                            },
+                            transform: Transform::from_translation(player_transform.translation),
+                            ..default()
+                        },
+                        Projectile {
+                            direction: rotated_direction, // Start moving in random direction
+                            speed: 400.0, // Slower but homing
+                            ttl: Timer::from_seconds(3.0, TimerMode::Once),
+                            homing: true,
+                        },
+                    ));
                 }
             }
         }
@@ -390,9 +470,31 @@ mod combat {
     fn move_projectiles(
         mut commands: Commands,
         mut query: Query<(Entity, &mut Transform, &mut Projectile)>,
+        enemy_query: Query<&Transform, (With<enemy::Enemy>, Without<Projectile>)>,
         time: Res<Time>,
     ) {
         for (entity, mut transform, mut projectile) in query.iter_mut() {
+            if projectile.homing {
+                // Find closest enemy
+                let mut closest_enemy: Option<Vec3> = None;
+                let mut min_dist = 500.0; // Homing range
+
+                for enemy_transform in enemy_query.iter() {
+                    let distance = transform.translation.distance(enemy_transform.translation);
+                    if distance < min_dist {
+                        min_dist = distance;
+                        closest_enemy = Some(enemy_transform.translation);
+                    }
+                }
+
+                if let Some(target_pos) = closest_enemy {
+                    let direction_to_target = (target_pos - transform.translation).normalize_or_zero();
+                    // Steer towards target
+                    let steer_strength = 5.0;
+                    projectile.direction = (projectile.direction + direction_to_target * steer_strength * time.delta_seconds()).normalize_or_zero();
+                }
+            }
+
             transform.translation += projectile.direction * projectile.speed * time.delta_seconds();
             if projectile.ttl.tick(time.delta()).finished() {
                 commands.entity(entity).despawn();
@@ -649,7 +751,6 @@ mod leveling {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use bevy::prelude::*;
 
         #[test]
         fn test_level_up_logic() {
@@ -674,7 +775,7 @@ mod leveling {
             // State transitions are applied at the start of the next frame.
             // But next_state is in NextState resource.
             let next_state = app.world.resource::<NextState<GameState>>();
-            
+
             // To verify state transition, we need to apply state transitions.
             // But we can just check if NextState was set.
             if let Some(s) = next_state.0 {
@@ -820,6 +921,8 @@ mod ui {
         ChainLightning,
         BladeCount,
         AttackSpeed,
+        Shotgun,
+        HomingMissile,
     }
 
     fn show_level_up_menu(
@@ -834,6 +937,8 @@ mod ui {
                 (Upgrade::ChainLightning, "Chain Lightning"),
                 (Upgrade::BladeCount, "More Blades"),
                 (Upgrade::AttackSpeed, "Faster Attacks"),
+                (Upgrade::Shotgun, "Shotgun"),
+                (Upgrade::HomingMissile, "Homing Missiles"),
             ];
             
             let mut rng = rand::thread_rng();
@@ -891,6 +996,8 @@ mod ui {
                     Upgrade::ChainLightning => weapon_stats.chain_lightning += 1,
                     Upgrade::BladeCount => weapon_stats.blade_count += 1,
                     Upgrade::AttackSpeed => weapon_stats.fire_rate *= 0.9,
+                    Upgrade::Shotgun => weapon_stats.shotgun_count += 1,
+                    Upgrade::HomingMissile => weapon_stats.homing_count += 1,
                 }
                 game_state.set(GameState::Running);
             }
