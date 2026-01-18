@@ -1,0 +1,16 @@
+[package]
+name = "swarm_haven"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.13.2"
+rand = "0.8.5"
+
+# Enable max optimizations for dependencies, but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
+
+# Enable only a small amount of optimization for our code in dev mode:
+[profile.dev]
+opt-level = 1
